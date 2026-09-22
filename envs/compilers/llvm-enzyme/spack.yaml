@@ -1,0 +1,44 @@
+# This is a Spack Environment file.
+#
+# It describes a set of packages to be installed, along with
+# configuration settings.
+spack:
+  # add package specs to the `specs` list
+  specs:
+  - llvm@20.1.8~lua
+  view: true
+  concretizer:
+    unify: true
+  packages:
+    gcc:
+      externals:
+      - spec: gcc@13.3.0 languages:='c,c++,fortran'
+        prefix: /usr
+        extra_attributes:
+          compilers:
+            c: /usr/bin/gcc
+            cxx: /usr/bin/g++
+            fortran: /usr/bin/gfortran
+    llvm:
+      externals:
+      - spec: llvm@20.1.8+clang~flang+lld+lldb
+        prefix: /home/craig/dev/cpp_continuum_mechanics/envs/compilers/llvm-enzyme/.spack-env/view
+        extra_attributes:
+          compilers:
+            c: /home/craig/dev/cpp_continuum_mechanics/envs/compilers/llvm-enzyme/.spack-env/view/bin/clang
+            cxx: /home/craig/dev/cpp_continuum_mechanics/envs/compilers/llvm-enzyme/.spack-env/view/bin/clang++
+      - spec: llvm@18.1.3+clang~flang~lld~lldb
+        prefix: /usr
+        extra_attributes:
+          compilers:
+            c: /usr/bin/clang
+            cxx: /usr/bin/clang++
+    llvm-amdgpu:
+      externals:
+      - spec: llvm-amdgpu@7.2.0
+        prefix: /usr
+        extra_attributes:
+          compilers:
+            c: /usr/bin/amdclang
+            cxx: /usr/bin/amdclang++
+            fortran: /usr/bin/amdflang

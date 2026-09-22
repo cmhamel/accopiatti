@@ -1,0 +1,41 @@
+# This is a Spack Environment file.
+#
+# It describes a set of packages to be installed, along with
+# configuration settings.
+spack:
+  # add package specs to the `specs` list
+  specs:
+  # - enzyme
+  - trilinos@17.2.1+exodus+intrepid2+panzer+stk
+  # - trilinos@17.2.2
+  - yaml-cpp
+  view: true
+  concretizer:
+    unify: true
+  packages:
+    c:
+      prefer: [llvm]
+    cxx:
+      prefer: [llvm]
+    fortran:
+      require: [gcc]
+    gcc:
+      externals:
+      - spec: gcc@13.3.0 languages:='c,c++,fortran'
+        prefix: /usr
+        extra_attributes:
+          compilers:
+            c: /usr/bin/gcc
+            cxx: /usr/bin/g++
+            fortran: /usr/bin/gfortran
+    llvm:
+      externals:
+      - spec: llvm@20.1.8+clang~flang+lld+lldb
+        prefix: /home/craig/dev/cpp_continuum_mechanics/spack/opt/spack/linux-x86_64_v4/llvm-20.1.8-bu6vhrxfynesrprnef42s5actqas5j6e
+        extra_attributes:
+          compilers:
+            c: /home/craig/dev/cpp_continuum_mechanics/spack/opt/spack/linux-x86_64_v4/llvm-20.1.8-bu6vhrxfynesrprnef42s5actqas5j6e/bin/clang
+            cxx: /home/craig/dev/cpp_continuum_mechanics/spack/opt/spack/linux-x86_64_v4/llvm-20.1.8-bu6vhrxfynesrprnef42s5actqas5j6e/bin/clang++
+  repos:
+    builtin:
+      destination: spack-packages/

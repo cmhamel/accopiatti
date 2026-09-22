@@ -1,0 +1,9 @@
+[submodule "spack"]
+	path = spack
+	url = https://github.com/spack/spack.git
+[submodule "tensor_toolkit"]
+	path = tensor_toolkit
+	url = git@github.com:cmhamel/tensor_toolkit.git
+[submodule "spack-packages"]
+	path = spack-packages
+	url = https://github.com/spack/spack-packages.git
