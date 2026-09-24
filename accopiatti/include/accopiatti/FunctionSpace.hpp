@@ -1,18 +1,14 @@
 #pragma once
+#include <accopiatti/Mesh.hpp>
 #include <accopiatti/Types.hpp>
+#include <Intrepid2_HGRAD_HEX_C1_FEM.hpp>
+#include <Intrepid2_Orientation.hpp>
+#include <Intrepid2_CellTools.hpp>
 #include <Intrepid2_DefaultCubatureFactory.hpp>
 #include <Intrepid2_FunctionSpaceTools.hpp>
+#include <stdexcept>
 
 namespace accopiatti {
-
-// Intrepid2's Basis::getValues, Cubature::getCubature, CellTools and
-// FunctionSpaceTools are all written against Kokkos::DynRankView. Our storage is
-// static-rank (fast in kernels), so wrap it in a non-owning-semantics alias
-// (shares the same allocation, no copy) at the call boundary.
-template<Scalar T, class ViewType>
-inline Kokkos::DynRankView<T, Device> as_dyn(const ViewType& v) {
-    return Kokkos::DynRankView<T, Device>(v);
-}
 
 template<Scalar T>
 class BasisFactory {
@@ -32,6 +28,8 @@ public:
         case FunctionSpaceType::L2:
             throw std::runtime_error("Finish L2 wrapper methods");
         }
+
+        throw std::runtime_error("Unsupported feature encounted.");
     }
 
     // should we always be pinging the jacobian
@@ -40,22 +38,34 @@ public:
     static Teuchos::RCP<Basis<T>> create_geometry(
         stk::topology topology
     ) {
-        return create_h1(topology, 1);
+        // return create_h1(topology, 1);
+        // if (topology == stk::topology::HEXAHEDRON_8) {
+        //     return Teuchos::rcp(new Intrepid2::Basis_HGRAD_HEX_C1_FEM<Device, T, T>());
+        // }
+
+        switch (topology) {
+        case stk::topology::QUADRILATERAL_4_2D:
+            return Teuchos::rcp(new Intrepid2::Basis_HGRAD_QUAD_C1_FEM<Device, T, T>());
+        case stk::topology::HEXAHEDRON_8:
+            return Teuchos::rcp(new Intrepid2::Basis_HGRAD_HEX_C1_FEM<Device, T, T>());
+        default:
+            throw std::runtime_error("Unsupported topology for Hgrad basis: " + topology.name());
+        }
     }
 private:
     static Teuchos::RCP<Basis<T>> create_h1(
         stk::topology topology,
         int order
     ) {
-        if (topology == stk::topology::QUADRILATERAL_4_2D) {
+        switch (topology) {
+        case stk::topology::QUADRILATERAL_4_2D:
             return Teuchos::rcp(new HgradQuadBasis<T>(order));
-        }
-
-        if (topology == stk::topology::HEXAHEDRON_8) {
+        case stk::topology::HEXAHEDRON_8:
             return Teuchos::rcp(new HgradHexBasis<T>(order));
+        default:
+            throw std::runtime_error("Unsupported topology for Hgrad basis: " + topology.name());
         }
 
-        throw std::runtime_error("Unsupported topology for H1 basis: " + topology.name());
     }
 
     // TODO implement hcurl, hdiv, L2 wrappers
@@ -68,92 +78,56 @@ struct FunctionSpaceHelper {
     int integration_order;
 };
 
-template<Scalar T, int Dim>           // D
-struct ReferenceElement {
-    int num_basis = 0;      // F
-    int num_geo_nodes = 0;  // N
-    int num_qp = 0;         // Q
-    QuadraturePoints<T> q_pts; // (Q, D)
-    QuadratureWeights<T> q_wts;     // (Q,)
-    ReferenceValues<T> Ns;          // (F, Q)
-    ReferenceGradients<T> grad_N_xis; // (F, Q, D)
-};
-
+// TODO only works for total lagrange type implementations currently
 template<Scalar T, int Dim>
 struct ElementBasisWorkset {
-    Jacobians<T, Dim> jacs;
-    JacobianDets<T> jac_dets;
-    JacobianInverses<T, Dim> jac_invs;
-    JxWs<T> JxWs;
-    PhysicalGradients<T, Dim> grad_Ns;
-};
-
-
-template<Scalar T, int Dim>
-struct FunctionSpaceWorkset {
-    std::string block_name;
-    stk::topology topology;
-    int num_els = 0;
-    int num_nodes_per_el = 0;
-    int space_dim = 0;
-    CoordinatesView<T> el_coords;
-    ElementBasisWorkset<T, Dim> workset;
-};
-
-// TODO need to add a lot of error checking
-template<Scalar T, int Dim>
-ReferenceElement<T, Dim> build_reference_data(
-    const Teuchos::RCP<Basis<T>>& basis,
-    const Teuchos::RCP<Basis<T>>& geometry_basis,
-    const int integration_order
-) {
-    ReferenceElement<T, Dim> ref;
-    const shards::CellTopology cell_topo = basis->getBaseCellTopology();
-    auto quadrature = Intrepid2::DefaultCubatureFactory::create<Device, T, T>(cell_topo, integration_order);
-
-    ref.num_basis = static_cast<int>(basis->getCardinality());
-    ref.num_geo_nodes = static_cast<int>(basis->getCardinality());
-    ref.num_qp = static_cast<int>(quadrature->getNumPoints());
-    const int F = ref.num_basis;
-    const int N = ref.num_geo_nodes;
-    const int Q = ref.num_qp;
-
-    // setup quadrature
-    ref.q_pts = QuadraturePoints<T>("reference_quadrature_points", Q, Dim);
-    ref.q_wts = QuadratureWeights<T>("reference_quadrature_weights", Q);
-    quadrature->getCubature(ref.q_pts, ref.q_wts);
-
-    // // setup basis values
-    ref.Ns = ReferenceValues<T>("reference_basis_values", F, Q);
-    ref.grad_N_xis = ReferenceGradients<T>("reference_basis_gradients", F, Q, Dim);
-    basis->getValues(ref.Ns, ref.q_pts, Intrepid2::OPERATOR_VALUE);
-    basis->getValues(ref.grad_N_xis, ref.q_pts, Intrepid2::OPERATOR_GRAD);
-    return ref;
-}
-
-template<Scalar T, int Dim>
-ElementBasisWorkset<T, Dim> build_element_workset(
-    FunctionSpaceWorkset<T, Dim>& workset,
-    const ReferenceElement<T, Dim>& ref,
-    const Teuchos::RCP<Basis<T>>& geometry_basis
-) {
     using CellTools = Intrepid2::CellTools<Device>;
     using FSpaceTools = Intrepid2::FunctionSpaceTools<Device>;
-    const int C = workset.num_els;
-    const int F = ref.num_basis;
-    const int Q = ref.num_qp;
-    ElementBasisWorkset<T, Dim> el_workset;
 
-    Jacobians<T, Dim> jacs("jacobians", C, Q);
-    el_workset.jacs = Jacobians<T, Dim>("jacobians", C, Q);
-    el_workset.jac_invs = JacobianInverses<T, Dim>("jacobian_inverse", C, Q);
-    el_workset.jac_dets = JacobianInverses<T, Dim>("jacobian_dets", C, Q);
-    el_workset.JxWs = JxWs<T>("JxWs", C, Q);
+    int num_basis;
+    int num_geom_basis;
+    int num_elements;
+    int num_qp;
+    Teuchos::RCP<Basis<T>> basis;
+    Teuchos::RCP<Basis<T>> geometry_basis;
+    
 
-    CellTools::setJacobian(el_workset.jacs, ref.q_pts, el_workset.el_coords, geometry_basis);
-    CellTools::setJacobianInv(el_workset.jac_invs, el_workset.jacs);
-    CellTools::setJacobianDet(el_workset.jac_dets, el_workset.jacs);
-}
+    CoordinatesView<T, Dim> el_coords;
+    Jacobians<T, Dim> jacs;
+    JacobianDets<T> jac_dets;
+    JacobianInverses<T> jac_invs;
+    JxWs<T> jxws;
+    PhysicalGradients<T> physical_grads;
+    PhysicalPoints<T, Dim> physical_q_pts;
+    QuadraturePoints<T> q_pts;
+    QuadratureWeights<T> q_wts;
+    ReferenceBasisGradients<T> grad_N_xis;
+    ReferenceBasisGradients<T> geom_grad_N_xis;
+    ReferenceBasisValues<T> Ns;
+    ReferenceBasisValues<T> geom_Ns;
+    // stk::topology topology;
+
+    ElementBasisWorkset() = default;
+
+    ElementBasisWorkset(
+        const Teuchos::RCP<Basis<T>>& basis_,
+        const Teuchos::RCP<Basis<T>>& geometry_basis_,
+        const int integration_order,
+        CoordinatesView<T, Dim>& el_coords_
+    );
+
+    void update_jacobians();
+    void update_physical_gradients();
+    void update_physical_quadrature_points();
+
+    // Add this method to ElementBasisWorkset (or call as a free function passing
+    // el_coords / jac_dets) right after update_jacobians() in the constructor.
+    // It is deliberately independent of Intrepid2/CellTools: it just reports
+    // what raw data went into the Jacobian, so you can tell whether the mesh
+    // data itself is bad (duplicate/degenerate nodes) vs. an ordering bug.
+
+    void debug_dump_bad_elements(T tol) const;
+};
 
 template<Scalar T, int Dim>
 class FunctionSpace {
@@ -163,66 +137,10 @@ public:
         const std::string& block_name,
         const FunctionSpaceHelper& fspace_helper,
         const int workset_size
-    ) {
-        auto bulk = mesh.mesh->getBulkData();
-        auto meta = mesh.mesh->getMetaData();
-        const int space_dim = static_cast<int>(meta->spatial_dimension());
-        stk::mesh::Part* block_part = meta->get_part(block_name);
-        stk::topology topology = block_part->topology();
-        basis = BasisFactory<T>::create(topology, fspace_helper.function_space, fspace_helper.basis_order);
-        geometry_basis = BasisFactory<T>::create_geometry(topology);
+    );
 
-        const int num_nodes_per_el = static_cast<int>(topology.num_nodes());
-        if (num_nodes_per_el != static_cast<int>(geometry_basis->getCardinality())) {
-            throw std::runtime_error("FunctionSpace: STK node count != geometry basis cardinality");
-        }
-
-        ref_fe = build_reference_data<T, Dim>(basis, geometry_basis, fspace_helper.integration_order);
-        // auto* coord_field = meta->get_field<T>(stk::topology::NODE_RANK, "coordinates");
-        // stk::mesh::Selector selector = 
-        //     stk::mesh::Selector(*block_part) &
-        //     stk::mesh::Selector(meta->locally_owned_part());
-        // const stk::mesh::BucketVector& buckets = bulk->get_buckets(stk::topology::ELEM_RANK, selector);
-        // std::vector<FunctionSpaceWorkset<T, Dim>> worksets;
-        
-        // for (const stk::mesh::Bucket* bucket : buckets) {
-        //     const stk::topology topology = bucket->topology();
-        //     const int num_nodes_per_el = static_cast<int>(topology.num_nodes());
-        //     const int bucket_size = static_cast<int>(bucket->size());
-        //     for (int bucket_offset = 0; bucket_offset < bucket_size; bucket_offset += workset_size) {
-        //         const int num_els_in_workset = std::min(workset_size, bucket_size - bucket_offset);
-        //         FunctionSpaceWorkset<T, Dim> ws = FunctionSpaceWorkset<T, Dim> {
-        //             block_name, topology, num_els_in_workset, num_nodes_per_el, space_dim,
-        //             CoordinatesView<T>("el_nodes_" + block_name, num_els_in_workset, num_nodes_per_el, space_dim)
-        //         };
-        //         auto h_el_nodes = Kokkos::create_mirror_view(ws.el_coords);
-        //         for (int c = 0; c < num_els_in_workset; ++c) {
-        //             const stk::mesh::Entity elem = (*bucket)[bucket_offset + c];
-        //             const unsigned elem_num_nodes = bulk->num_nodes(elem);
-        //             // error check this
-        //             const stk::mesh::Entity* elem_nodes = bulk->begin_nodes(elem);
-
-        //             for (int n = 0; n < num_nodes_per_el; ++n) {
-        //                 const stk::mesh::Entity node = elem_nodes[n];
-        //                 const T* x = stk::mesh::field_data(*coord_field, node);
-        //                 // error checking here on x not being nullptr
-        //                 for (int d = 0; d < space_dim; ++d) {
-        //                     h_el_nodes(c, n, d) = x[d];
-        //                 }
-        //             }
-        //         }
-        //         Kokkos::deep_copy(ws.el_coords, h_el_nodes);
-        //         build_element_workset<T, Dim>(ws, ref_fe, geometry_basis);
-        //         worksets.push_back(std::move(ws));
-        //     }
-        // }
-    }
 private:
-    Teuchos::RCP<Basis<T>> basis;
-    Teuchos::RCP<Basis<T>> geometry_basis;
-    ReferenceElement<T, Dim> ref_fe;
-    // std::vector<FunctionSpaceWorkSet> worksets;
+    std::vector<ElementBasisWorkset<T, Dim>> worksets;
 };
-
 
 } // end namespace accopiatti

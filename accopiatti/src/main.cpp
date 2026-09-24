@@ -1,26 +1,20 @@
-import accopiatti.cli_parser;
 #include <accopiatti/BCs.hpp>
-// #include <accopiatti/CLIParser.hpp>
-#include <accopiatti/DofManager.hpp>
+#include <accopiatti/CLIParser.hpp>
 #include <accopiatti/InputFileParser.hpp>
 #include <accopiatti/Mesh.hpp>
-#include <accopiatti/Physics.hpp>
-#include <accopiatti/Solver.hpp>
+#include <accopiatti/Simulation.hpp>
 #include <Kokkos_Core.hpp>
 #include <mpi.h>
+#include <stk_util/parallel/Parallel.hpp>
+
+using accopiatti::CLIParser;
+using accopiatti::InputFileParser;
+using accopiatti::Mesh;
 
 int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
     Kokkos::initialize(argc, argv);
     {
-        using accopiatti::BCStrategyFactory;
-        using accopiatti::CLIParser;
-        using accopiatti::DofManager;
-        using accopiatti::InputFileParser;
-        using accopiatti::Mesh;
-        using accopiatti::Physics;
-        using accopiatti::LinearSystem;
-
         stk::ParallelMachine comm = MPI_COMM_WORLD;
         CLIParser clp = CLIParser(comm);
         std::pair<int, int> error_code = clp.parse(argc, argv);
@@ -40,26 +34,40 @@ int main(int argc, char** argv) {
         out << "Log file   = " << log_file << std::endl;
 
         InputFileParser ilp(input_file);
-        auto bc_inputs = ilp.get_input_block_raw("boundary conditions");
-        auto material_inputs = ilp.get_input_block_raw("materials");
+        // auto bc_inputs = ilp.get_input_block_raw("boundary conditions");
+        // auto material_inputs = ilp.get_input_block_raw("materials");
         auto mesh_inputs = ilp.get_input_block_raw("mesh");
-        auto physics_inputs = ilp.get_input_block_raw("physics");
-        auto solution_inputs = ilp.get_input_block_raw("solution fields");
+        // auto physics_inputs = ilp.get_input_block_raw("physics");
+        // auto solution_inputs = ilp.get_input_block_raw("solution fields");
         out << "Mesh = " << mesh_inputs << std::endl;
 
         Mesh mesh(comm, mesh_inputs);
+        auto block_names = mesh.get_element_block_names();
+        for (auto& block_name : block_names) {
+            std::cout << block_name << std::endl;
+        }
 
-        BCStrategyFactory bc_factory;
-        std::vector<panzer::BC> bcs = accopiatti::setup_bcs(mesh, bc_inputs);
+        // BCStrategyFactory bc_factory;
+        // std::vector<panzer::BC> bcs = accopiatti::setup_bcs(mesh, bc_inputs);
+        const int dim = mesh.get_dimension();
+        
+        if (dim == 1) {
+            run_sim<double, 1>(comm, ilp, mesh);
+        } else if (dim == 2) {
+            run_sim<double, 2>(comm, ilp, mesh);
+        } else if (dim == 3) {
+            run_sim<double, 3>(comm, ilp, mesh);
+        } else {
+            throw std::runtime_error("Got dimension other than 1, 2, or 3.");
+        }
+        // DofManager dof_manager(comm, mesh, solution_inputs);
+        // dof_manager.summarize(out);
+        // LinearSystem linear_system(comm, dof_manager);
 
-        DofManager dof_manager(comm, mesh, solution_inputs);
-        dof_manager.summarize(out);
-        LinearSystem linear_system(comm, dof_manager);
-
-        auto test_workset = accopiatti::build_block_physics_worksets(
-            dof_manager, mesh, "block_1", 1024
-        );
-        std::cout << "Num worksets" << test_workset[0].el_coords(0, 0, 0) << std::endl;
+        // auto test_workset = accopiatti::build_block_physics_worksets(
+        //     dof_manager, mesh, "block_1", 1024
+        // );
+        // std::cout << "Num worksets" << test_workset[0].el_coords(0, 0, 0) << std::endl;
 
         // auto block_el_ids = mesh.get_block_element_ids("block_1");
         // for (auto local_el : block_el_ids) {

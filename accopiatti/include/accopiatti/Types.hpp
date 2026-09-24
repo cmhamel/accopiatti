@@ -5,6 +5,8 @@
 #include <Intrepid2_HGRAD_HEX_Cn_FEM.hpp>
 #include <Kokkos_Core.hpp>
 #include <stk_mesh/base/Entity.hpp>
+#include <stk_mesh/base/Types.hpp>
+#include <stk_topology/topology_decl.hpp>
 #include <type_traits>
 
 namespace accopiatti {
@@ -29,10 +31,12 @@ template<Scalar T>
 using HgradQuadBasis  = Intrepid2::Basis_HGRAD_QUAD_Cn_FEM<Device, T, T>;
 
 // types for worksets
-template<Scalar T>
-using CoordinatesView = Kokkos::View<T***, Device>;
+template<Scalar T, int Dim>
+using CoordinatesView = Kokkos::View<T**[Dim], Device>;
 
 // Quadrature helpers
+// all dynamic since these are only run at startup...
+// saves some conversions between View and DynRankView
 template<Scalar T>
 using QuadraturePoints  = Kokkos::DynRankView<T, Device>;
 template<Scalar T>
@@ -40,26 +44,29 @@ using QuadratureWeights = Kokkos::DynRankView<T, Device>;
 
 // Reference element helpers
 // (QP, D)
-template<Scalar T, int Dim>
-using ReferencePoints    = Kokkos::DynRankView<T, Device>;
 template<Scalar T>
-using ReferenceValues    = Kokkos::DynRankView<T, Device>;
+using ReferenceBasisValues    = Kokkos::DynRankView<T, Device>;
 template<Scalar T>
-using ReferenceGradients = Kokkos::DynRankView<T, Device>;
+using ReferenceBasisGradients = Kokkos::DynRankView<T, Device>;
 
 
 // element workset helpers 
 template<Scalar T, int Dim>
 using Jacobians        = Kokkos::View<T**[Dim][Dim], Device>;
-template<Scalar T, int Dim>
-using JacobianInverses = Kokkos::View<T**[Dim][Dim], Device>;
+// using Jacobians        = Kokkos::DynRankView<T, Device>;
+template<Scalar T>
+// using JacobianInverses = Kokkos::View<T**[Dim][Dim], Device>;
+using JacobianInverses = Kokkos::DynRankView<T, Device>;
 template<Scalar T>
 using JacobianDets     = Kokkos::View<T**, Device>;
 template<Scalar T>
 using JxWs             = Kokkos::View<T**, Device>;
 
+template<Scalar T>
+// using PhysicalGradients = Kokkos::View<T***[Dim], Device>;
+using PhysicalGradients = Kokkos::DynRankView<T, Device>;
 template<Scalar T, int Dim>
-using PhysicalGradients = Kokkos::View<T***[Dim], Device>;
+using PhysicalPoints = Kokkos::View<T**[Dim], Device>;
 
 // template<int Dim>
 // using PointVectorView

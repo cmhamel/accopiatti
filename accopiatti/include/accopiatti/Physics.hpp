@@ -1,5 +1,11 @@
 #pragma once
 // #include "Panzer_EquationSet_DefaultImpl.hpp"
+#include <accopiatti/Types.hpp>
+#include <Kokkos_Core.hpp>
+#include <stk_mesh/base/Field.hpp>
+#include <stk_mesh/base/FieldData.hpp>
+#include <stk_mesh/base/Selector.hpp>
+#include <stk_topology/topology.hpp>
 #include <yaml-cpp/yaml.h>
 
 namespace accopiatti {
