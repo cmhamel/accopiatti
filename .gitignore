@@ -2,3 +2,7 @@
 build/
 spack.lock
 /envs/**/spack-packages/
+*.g.*
+*.e.*
+*.exo.*
+
