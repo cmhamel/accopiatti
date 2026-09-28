@@ -1,0 +1,24 @@
+mesh:
+  type: structured
+  element type: quad
+  x blocks: 1
+  y blocks: 1
+  x elements: 100
+  y elements: 100
+
+solution fields:
+  u:
+    basis order: 2
+    field type: scalar
+    function space: Hgrad
+    integration order: 2
+
+boundary conditions:
+  - field: u
+    function: 0.0
+    side sets: [bottom, left, right, top]
+    type: dirichlet
+
+physics:
+  type: poisson
+  solution fields: [u]
