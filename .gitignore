@@ -5,4 +5,5 @@ spack.lock
 *.g.*
 *.e.*
 *.exo.*
+*.log
 
