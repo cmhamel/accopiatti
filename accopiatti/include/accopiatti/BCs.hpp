@@ -1,16 +1,11 @@
 #pragma once
+#include <accopiatti/DofManager.hpp>
 #include <accopiatti/Macros.hpp>
 #include <accopiatti/Mesh.hpp>
-#include "Panzer_BCStrategy_Dirichlet_DefaultImpl.hpp"
-#include "Panzer_BCStrategy_Factory.hpp"
 #include "Panzer_BCStrategy_Factory_Defines.hpp"
-#include "Panzer_BCStrategy_TemplateManager.hpp"
 #include "Panzer_Constant.hpp"
-#include "Panzer_PhysicsBlock.hpp"
-#include "Panzer_PureBasis.hpp"
-#include "Panzer_Traits.hpp"
-#include "Phalanx_FieldManager.hpp"
-#include "Teuchos_RCP.hpp"
+#include <Panzer_STK_SetupUtilities.hpp>
+#include <Panzer_STK_Utilities.hpp>
 #include <yaml-cpp/yaml.h>
 
 namespace accopiatti {
@@ -23,132 +18,164 @@ struct BCHelper {
     std::string type;
 };
 
-std::vector<panzer::BC> setup_bcs(Mesh& mesh, YAML::Node bc_inputs) {
-    std::vector<panzer::BC> out = {};
+inline std::vector<size_t> get_sorted_unique_indices(const std::vector<GlobalOrdinal>& v) {
+    // 1. Generate an initial index sequence [0, v.size() - 1]
+    std::vector<size_t> indices(v.size());
+    std::iota(indices.begin(), indices.end(), 0);
+
+    // 2. Sort the indices based on the values in the original vector
+    std::sort(indices.begin(), indices.end(), [&v](size_t i1, size_t i2) {
+        return v[i1] < v[i2];
+    });
+
+    // 3. Remove consecutive duplicate values using std::unique on the indices
+    auto last = std::unique(indices.begin(), indices.end(), [&v](size_t i1, size_t i2) {
+        return v[i1] == v[i2];
+    });
+
+    // 4. Shrink the indices vector to fit the unique elements
+    indices.erase(last, indices.end());
+
+    return indices;
+}
+
+template<Scalar T, int Dim>
+auto get_sideset_gids(
+    Mesh& mesh,
+    DofManager<T, Dim>& dof_manager,
+    const std::string& block_name,
+    const std::string& sideset_name,
+    const std::string& field_name
+) {
+    std::vector<stk::mesh::Entity> sides;
+    mesh.mesh->getMySides(sideset_name, sides);
+ 
+    std::vector<std::size_t> local_side_ids;
+    std::vector<stk::mesh::Entity> elements;
+    panzer_stk::workset_utils::getSideElements(
+        *mesh.mesh, block_name,
+        sides, local_side_ids, elements
+    );
+
+    constexpr int subcell_dim = Dim - 1;
+    std::vector<int> basis_ids;
+    std::vector<GlobalOrdinal> global_ids;
+    for (std::size_t i = 0; i < elements.size(); ++i) {
+        const LocalOrdinal local_elem_id = mesh.mesh->elementLocalId(elements[i]);
+        const int side_ordinal = static_cast<int>(local_side_ids[i]);
+ 
+        std::vector<GlobalOrdinal> elem_gids;
+        dof_manager.get_element_global_dof_ids(block_name, local_elem_id, elem_gids);
+ 
+        const auto& [offsets, basis_indices] = dof_manager.get_field_offsets_closure(
+            block_name, field_name, subcell_dim, side_ordinal
+        );
+
+        // NOTE basis_indices above gives the index for the basis
+        // associated with the gid accessed via offset.
+        for (int off : offsets) {
+            global_ids.push_back(elem_gids[off]);
+        }
+
+        for (int index : basis_indices) {
+            basis_ids.push_back(index);
+        }
+    }
+
+    return std::make_pair(basis_ids, global_ids);
+}
+
+struct DirichletBCs {
+    std::vector<int> basis_ids;
+    std::vector<int> bc_ids;
+    std::vector<GlobalOrdinal> global_ids;
+};
+
+// TODO this needs to be heavily refined for different types of bcs
+// and different potential function spaces for the fields.
+// everything right now assumes Hgrad/Dirichlet
+template<Scalar T, int Dim>
+inline DirichletBCs setup_dirichlet_bcs(
+    Mesh& mesh,
+    DofManager<T, Dim>& dof_manager,
+    std::map<std::string, FieldSetupHelper>& field_helpers,
+    YAML::Node bc_inputs
+) {
     if (!bc_inputs.IsSequence()) {
         std::cerr << "Error: Root node is not a sequence!" << std::endl;
         throw std::runtime_error("BC inputs needs to be a sequence!");
     }
 
     int bc_id = 0;
+    std::vector<int> basis_ids;
+    std::vector<int> bc_ids;
+    std::vector<GlobalOrdinal> global_ids;
     for (const auto& item : bc_inputs) {
         // BCHelper bc;
-        // INPUT_FILE_KEY_CHECK(item, "components", "boundary conditions");
-        INPUT_FILE_KEY_CHECK(item, "field", "boundary_conditions");
-        INPUT_FILE_KEY_CHECK(item, "function", "boundary conditions");
-        INPUT_FILE_KEY_CHECK(item, "side sets", "boundary conditions");
-        INPUT_FILE_KEY_CHECK(item, "type", "boundary conditions");
+        INPUT_FILE_KEY_CHECK("boundary conditions", item, "field");
+        INPUT_FILE_KEY_CHECK("boundary conditions", item, "function");
+        INPUT_FILE_KEY_CHECK("boundary conditions", item, "side sets");
+        INPUT_FILE_KEY_CHECK("boundary conditions", item, "type");
         std::vector<std::string> components{};
         if (item["components"]) {
             components = item["components"].as<std::vector<std::string>>();
         }
+    
         auto field = item["field"].as<std::string>();
         auto function = item["function"].as<std::string>();
         auto side_sets = item["side sets"].as<std::vector<std::string>>();
         auto type = item["type"].as<std::string>();
-        panzer::BCType bc_type = panzer::BCT_Dirichlet;
+
+        if (type != "dirichlet") {
+            continue;
+        }
+
+        std::vector<std::string> field_names;
+        if (components.size() > 0) {
+            for (const auto& component : components) {
+                field_names.push_back(field + "_" + component);
+            }
+        } else {
+            field_names.push_back(field);
+        }
+
+        // add checks to make sure field is in dof manager / field helpers
+        const int& basis_order = field_helpers[field].basis_order;
+        // std::vector<int> basis_ids;
+        // std::vector<int> bc_ids;
+        // std::vector<GlobalOrdinal> global_ids;
         for (const auto& side_set : side_sets) {
             auto side_set_blocks = mesh.get_sideset_element_block_names(side_set);
-            for (const auto& block : side_set_blocks) {
-                Teuchos::ParameterList params;
-                params.set("Value", 0.0); // TODO
-                panzer::BC bc(bc_id, bc_type, side_set, block, field, type, params);
-                ++bc_id;
+            for (const auto& block_name : side_set_blocks) {
+                for (const auto& field_name : field_names) {
+                    auto [temp_basis_ids, temp_global_ids] = get_sideset_gids<T, Dim>(mesh, dof_manager, block_name, side_set, field_name);
+                    for (int i = 0; i < temp_basis_ids.size(); ++i) {
+                        bc_ids.push_back(bc_id);
+                    }
+                    basis_ids.insert(basis_ids.end(), temp_basis_ids.begin(), temp_basis_ids.end());
+                    global_ids.insert(global_ids.end(), temp_global_ids.begin(), temp_global_ids.end());
+                }
             }
         }
+
+        bc_id += 1;
     }
-    return out;
+    assert(basis_ids.size() == bc_ids.size());
+    assert(basis_ids.size() == global_ids.size());
+    std::vector<size_t> indices = get_sorted_unique_indices(global_ids);
+    std::vector<int> new_basis_ids;
+    std::vector<int> new_bc_ids;
+    std::vector<GlobalOrdinal> new_global_ids;
+    for (const auto& index : indices) {
+        new_basis_ids.push_back(basis_ids[index]);
+        new_bc_ids.push_back(bc_ids[index]);
+        new_global_ids.push_back(global_ids[index]);
+    }
+
+    std::cout << "Num global ids in bcs = " << new_global_ids.size();
+    // DirichletBCs bc = DirichletBCs{basis_ids, bc_ids, global_ids};
+    DirichletBCs bc = DirichletBCs{new_basis_ids, new_bc_ids, new_global_ids};
+    return bc;
 }
-
-template <typename T>
-class BCStrategy_Dirichlet_Constant : public panzer::BCStrategy_Dirichlet_DefaultImpl<T> {
-public:    
-    BCStrategy_Dirichlet_Constant(
-        const panzer::BC& bc,
-        const Teuchos::RCP<panzer::GlobalData>& global_data
-    ) : panzer::BCStrategy_Dirichlet_DefaultImpl<T>(bc, global_data) {
-        TEUCHOS_ASSERT(this->m_bc.strategy() == "Constant");
-    }
-
-    void setup(
-        const panzer::PhysicsBlock& side_pb,
-        const Teuchos::ParameterList& user_data
-    ) {
-        // need the dof value to form the residual
-        this->required_dof_names.push_back(this->m_bc.equationSetName());
-
-        // unique residual name
-        this->residual_name = "Residual_" + this->m_bc.identifier();
-
-        // map residual to dof 
-        this->residual_to_dof_names_map[residual_name] = this->m_bc.equationSetName();
-
-        // map residual to target field
-        this->residual_to_target_field_map[residual_name] = "Constant_" + this->m_bc.equationSetName();
-
-        // find the basis for this dof 
-        const std::vector<std::pair<std::string, Teuchos::RCP<panzer::PureBasis>>>& dofs = side_pb.getProvidedDOFs();
-
-        for (
-            std::vector<std::pair<std::string, Teuchos::RCP<panzer::PureBasis>>>::const_iterator dof_it = 
-            dofs.begin(); dof_it != dofs.end(); ++dof_it
-        ) {
-            if (dof_it->first == this->m_bc.equationSetName())
-                this->basis = dof_it->second;
-        }
-
-        TEUCHOS_TEST_FOR_EXCEPTION(
-            Teuchos::is_null(this->basis), std::runtime_error,
-                "Error the name \"" << this->m_bc.equationSetName()
-                << "\" is not a valid DOF for the boundary condition:\n"
-                << this->m_bc << "\n"
-            );
-    }
-
-    void buildAndRegisterEvaluators(
-        PHX::FieldManager<panzer::Traits>& fm,
-        const panzer::PhysicsBlock& pb,
-        const panzer::ClosureModelFactory_TemplateManager<panzer::Traits>& factory,
-        const Teuchos::ParameterList& models,
-        const Teuchos::ParameterList& user_data
-    ) const {
-        Teuchos::ParameterList p("BC Constant Dirichlet");
-        p.set("Name", "Constant_" + this->m_bc.equationSetName());
-        p.set("Data Layout", basis->functional);
-        p.set("Value", this->m_bc.params()->template get<double>("Value"));
-        
-        Teuchos::RCP< PHX::Evaluator<panzer::Traits>> op = 
-            Teuchos::rcp(new panzer::Constant<T, panzer::Traits>(p));
-        
-        this->template registerEvaluator<T>(fm, op);
-    }
-
-    std::string residual_name;
-    Teuchos::RCP<panzer::PureBasis> basis;
-};
-
-PANZER_DECLARE_BCSTRATEGY_TEMPLATE_BUILDER(BCStrategy_Dirichlet_Constant, BCStrategy_Dirichlet_Constant)
-
-struct BCStrategyFactory : public panzer::BCStrategyFactory {
-
-    Teuchos::RCP<panzer::BCStrategy_TemplateManager<panzer::Traits>>
-    buildBCStrategy(const panzer::BC& bc,const Teuchos::RCP<panzer::GlobalData>& global_data) const {
-        Teuchos::RCP<panzer::BCStrategy_TemplateManager<panzer::Traits> > bcs_tm = 
-	        Teuchos::rcp(new panzer::BCStrategy_TemplateManager<panzer::Traits>);
-      
-        bool found = false;
-        PANZER_BUILD_BCSTRATEGY_OBJECTS("Constant", BCStrategy_Dirichlet_Constant)
-        TEUCHOS_TEST_FOR_EXCEPTION(
-            !found, std::logic_error, 
-            "Error - the BC Strategy called \"" << bc.strategy() <<
-            "\" is not a valid identifier in the BCStrategyFactory.  Either add a "
-            "valid implementation to your factory or fix your input file.  The "
-            "relevant boundary condition is:\n\n" << bc << std::endl
-        );
-        
-        return bcs_tm;
-   }
-
-};
 
 } // end namespace accopiatti

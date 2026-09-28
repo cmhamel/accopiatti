@@ -1,0 +1,50 @@
+# This is a Spack Environment file.
+#
+# It describes a set of packages to be installed, along with
+# configuration settings.
+spack:
+  # add package specs to the `specs` list
+  specs:
+  - julia ^blas=openblas
+  - py-torch~distributed+mkldnn~valgrind~xnnpack
+  - trilinos@17.2.1+exodus+intrepid2+panzer+stk ^blas=openblas
+  - yaml-cpp
+  view: true
+  concretizer:
+    # unify: true
+    unify: when_possible
+  packages:
+    c:
+      require: [gcc]
+    cxx:
+      require: [gcc]
+    fortran:
+      require: [gcc]
+    gcc:
+      externals:
+      - spec: gcc@13.3.0 languages:='c,c++,fortran'
+        prefix: /usr
+        extra_attributes:
+          compilers:
+            c: /usr/bin/gcc
+            cxx: /usr/bin/g++
+            fortran: /usr/bin/gfortran
+    # julia:
+    #   require: [openblas]
+    llvm:
+      externals:
+      - spec: llvm@18.1.3+clang~flang~lld~lldb
+        prefix: /usr
+        extra_attributes:
+          compilers:
+            c: /usr/bin/clang
+            cxx: /usr/bin/clang++
+      - spec: llvm@20.1.8~flang
+        prefix: /home/craig/dev/cpp_continuum_mechanics/spack/opt/spack/linux-x86_64_v4/llvm-20.1.8-wsw5faxdjy5vyovtzkpnq5qttnqbweg6
+        extra_attributes:
+          compilers:
+            c: /home/craig/dev/cpp_continuum_mechanics/spack/opt/spack/linux-x86_64_v4/llvm-20.1.8-wsw5faxdjy5vyovtzkpnq5qttnqbweg6/bin/clang
+            cxx: /home/craig/dev/cpp_continuum_mechanics/spack/opt/spack/linux-x86_64_v4/llvm-20.1.8-wsw5faxdjy5vyovtzkpnq5qttnqbweg6/bin/clang++
+  repos:
+    builtin:
+      destination: spack-packages/

@@ -1,44 +1,38 @@
-#include <accopiatti/CLIParser.hpp>
+#include <accopiatti/FunctionSpace.hpp>
+#include <accopiatti/LinearSystem.hpp>
+#include <accopiatti/Mesh.hpp>
+#include <accopiatti/Parsers.hpp>
 #include <accopiatti/Simulation.hpp>
+#include <stk_util/parallel/Parallel.hpp>
 
 namespace accopiatti {
 
-template<Scalar T>
-void run_sim(CLIParser& clp) {
+void run_sim(stk::ParallelMachine& comm, CLIParser& clp) {
+    std::string input_file = clp.get_option<std::string>("input-file");
+    std::string log_file   = clp.get_option<std::string>("log-file");
+    Teuchos::FancyOStream out(Teuchos::rcpFromRef(std::cout));
+    out.setOutputToRootOnly(0);
+    out.setShowProcRank(true);
 
+    InputFileParser ilp(input_file);
+    auto mesh_inputs = ilp.get_input_block_raw("mesh");
+
+    Mesh mesh(comm, mesh_inputs);
+    const int dim = mesh.get_dimension();
+
+    switch (dim) {
+        case 1:
+            run_sim_inner<double, 1>(comm, ilp, mesh);
+            return;
+        case 2:
+            run_sim_inner<double, 2>(comm, ilp, mesh);
+            return;
+        case 3:
+            run_sim_inner<double, 3>(comm, ilp, mesh);
+            return;
+        default:
+            throw std::runtime_error("Got dimension other than 1, 2, or 3.");
+    }
 }
-
-template<accopiatti::Scalar T, int Dim>
-void run_sim(
-    stk::ParallelMachine& comm,
-    InputFileParser& ilp,
-    Mesh& mesh
-) {
-    auto bc_inputs = ilp.get_input_block_raw("boundary conditions");
-    auto material_inputs = ilp.get_input_block_raw("materials");
-    auto physics_inputs = ilp.get_input_block_raw("physics");
-    auto solution_inputs = ilp.get_input_block_raw("solution fields");
-    DofManager<T, Dim> dof = DofManager<T, Dim>(comm, mesh, solution_inputs);
-    // dof.summarize(out);
-    // LinearSystem linear_system(comm, dof_manager);
-}
-
-template void accopiatti::run_sim<double, 1>(
-    stk::ParallelMachine&,
-    accopiatti::InputFileParser&,
-    accopiatti::Mesh&
-);
-
-template void accopiatti::run_sim<double, 2>(
-    stk::ParallelMachine&,
-    accopiatti::InputFileParser&,
-    accopiatti::Mesh&
-);
-
-template void accopiatti::run_sim<double, 3>(
-    stk::ParallelMachine&,
-    accopiatti::InputFileParser&,
-    accopiatti::Mesh&
-);
 
 } // end namespace accopiatti

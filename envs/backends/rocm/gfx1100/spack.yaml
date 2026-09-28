@@ -5,9 +5,7 @@
 spack:
   # add package specs to the `specs` list
   specs:
-  # - enzyme
-  - trilinos@17.2.1+exodus+intrepid2+panzer+stk
-  # - trilinos@17.2.2
+  - trilinos@17.2.1+exodus+intrepid2+rocm+stk amdgpu_target=gfx1100
   - yaml-cpp
   view: true
   concretizer:

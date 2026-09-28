@@ -52,22 +52,6 @@ Mesh::Mesh(stk::ParallelMachine comm, YAML::Node mesh_inputs) {
 
     mesh = mesh_factory->buildUncommitedMesh(comm);
     mesh_factory->completeMeshConstruction(*mesh, comm);
-    conn_manager = Teuchos::rcp(new panzer_stk::STKConnManager(mesh));
-}
-
-std::map<std::string, stk::topology> Mesh::get_element_block_topologies() const {
-    std::map<std::string, stk::topology> result;
-    auto meta = mesh->getMetaData();
-
-    for (const auto& block_name : get_element_block_names()) {
-        stk::mesh::Part* part = meta->get_part(block_name);
-        if (part == nullptr) {
-            throw std::runtime_error("Could not find element block: " + block_name);
-        }
-        result.emplace(block_name, part->topology());
-    }
-
-    return result;
 }
 
 std::vector<std::string> Mesh::get_sideset_element_block_names(const std::string& sideset_name) const {
@@ -85,6 +69,21 @@ std::vector<std::string> Mesh::get_sideset_element_block_names(const std::string
         if (!sides.empty()) {
             result.push_back(block_name);
         }
+    }
+
+    return result;
+}
+
+std::map<std::string, stk::topology> Mesh::get_element_block_topologies() const {
+    std::map<std::string, stk::topology> result;
+    auto meta = mesh->getMetaData();
+
+    for (const auto& block_name : get_element_block_names()) {
+        stk::mesh::Part* part = meta->get_part(block_name);
+        if (part == nullptr) {
+            throw std::runtime_error("Could not find element block: " + block_name);
+        }
+        result.emplace(block_name, part->topology());
     }
 
     return result;
