@@ -4,6 +4,7 @@
 #include <mpi.h>
 #include <stk_util/parallel/Parallel.hpp>
 
+import accopiatti.physics;
 using accopiatti::CLIParser;
 
 int main(int argc, char** argv) {

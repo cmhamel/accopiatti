@@ -8,6 +8,8 @@
 #include <Intrepid2_DefaultCubatureFactory.hpp>
 #include <Intrepid2_FunctionSpaceTools.hpp>
 
+// import std;
+
 namespace accopiatti {
 
 template<Scalar T>
@@ -57,9 +59,7 @@ struct GeometryBasisWorkset {
         const Teuchos::RCP<Basis<T>>& geometry_basis_,
         const QuadratureWorkset<T>& quad_ws,
         CoordinatesView<T, Dim>& el_coords_
-        // Kokkos::DynRankView<T, Device>& el_coords_
     ) {
-        std::cout << "El coords size = (" << el_coords_.extent(0) << ", " << el_coords_.extent(1) << std::endl;
         basis = geometry_basis_;
         el_coords = el_coords_;
         num_elements = el_coords.extent(0);
@@ -274,26 +274,35 @@ public:
         auto* coord_field = mesh.get_coordinate_field<T>();
         auto field_names = dof_manager.get_solution_field_names();
         for (auto& block_name : block_names) {
-            auto block_el_coords = dof_manager.get_dof_coordinates(block_name);
+            // get local block quantities
+            auto [block_el_coords, block_elem_ids] = dof_manager.get_dof_coordinates_and_local_elem_ids(block_name);
+            std::unordered_map<std::size_t, int> row_of;
+            for (std::size_t r = 0; r < block_elem_ids.size(); ++r) row_of[block_elem_ids[r]] = (int) r;
+
+            // get bases information
             const auto& geometry_basis = dof_manager.geom_basis_map[block_name];
             const int& num_geom_basis = geometry_basis->getCardinality();
-            auto num_block_dofs = dof_manager.dof_manager->getElementBlockGIDCount(block_name);
-            auto buckets = mesh.get_local_elements(block_name);
-            std::cout << "In block = " << block_name << std::endl;
+
+            // TODO hardcoded to 1 field below... fix this
+            const auto& offsets = dof_manager.get_field_offsets(block_name, dof_manager.get_field_id(field_names[0]));
+            const int num_sol_basis = static_cast<int>(offsets.size());
+
+            const auto& buckets = mesh.get_local_elements(block_name);
             for (const stk::mesh::Bucket* bucket : buckets) {
                 const stk::topology topology = bucket->topology();
                 const int num_nodes_per_el = static_cast<int>(topology.num_nodes());
                 const int bucket_size = static_cast<int>(bucket->size());
-                std::map<int, int> stk_to_interpid2_dof_map = dof_manager.stk_to_intrepid2_dof_maps[block_name];
                 for (int bucket_offset = 0; bucket_offset < bucket_size; bucket_offset += workset_size) {
                     const int num_els_in_workset = std::min(workset_size, bucket_size - bucket_offset);
-                    auto el_coords = CoordinatesView<T, Dim>("el_coords_" + block_name, num_els_in_workset, num_nodes_per_el);
                     auto el_coords_2 = CoordinatesView<T, Dim>("el_coords_" + block_name, num_els_in_workset, num_nodes_per_el);
-                    auto h_el_nodes = Kokkos::create_mirror_view(el_coords);
+                    auto h_el_nodes = Kokkos::create_mirror_view(el_coords_2);
                     auto local_elem_ids = Kokkos::View<std::size_t*, Device>("local_elem_ids_" + block_name, num_els_in_workset);
 
                     auto h_local_elem_ids = Kokkos::create_mirror_view(local_elem_ids);
-                    auto block_global_dof_ids = Kokkos::View<GlobalOrdinal**, Device>(block_name + "_global_dof_ids", num_els_in_workset, num_block_dofs);
+                    auto block_global_dof_ids = Kokkos::View<GlobalOrdinal**, Device>(
+                        block_name + "_global_dof_ids", num_els_in_workset, num_sol_basis
+                    );
+                    auto h_gids_view = Kokkos::create_mirror_view(block_global_dof_ids);
 
                     for (int c = 0; c < num_els_in_workset; ++c) {
                         const stk::mesh::Entity elem = (*bucket)[bucket_offset + c];
@@ -305,32 +314,23 @@ public:
 
                         // element coordinates, should be a kernel in the future
                         for (int n = 0; n < num_nodes_per_el; ++n) {
-                        // for (int n = 0; n < geometry_basis->getCardinality(); ++n) {
-                            const stk::mesh::Entity node = elem_nodes[n];
-                            const T* x = stk::mesh::field_data(*coord_field, node);
-                            const int n_temp = stk_to_interpid2_dof_map[n];
-                            // error checking here on x not being nullptr
                             for (int d = 0; d < Dim; ++d) {
-                                // // h_el_nodes(c, n_temp, d) = x[d];
-                                h_el_nodes(c, n, d) = x[d];
-
                                 el_coords_2(c, n, d) = block_el_coords(elem_id, n, d);
                             }
                         }
                         // global ordinals
                         std::vector<GlobalOrdinal> gids;
                         dof_manager.get_element_global_dof_ids(block_name, elem_id, gids);
-                        for (int i = 0; i < gids.size(); ++i) {
-                            block_global_dof_ids(c, i) = gids[i];
+                        for (int i = 0; i < num_sol_basis; ++i) {
+                            h_gids_view(c, i) = gids[offsets[i]];   // ordinal i -> its GID
                         }
                     }
-                    Kokkos::deep_copy(el_coords, h_el_nodes);
-
-                    // auto el_coords_2 = dof_manager.get_dof_coordinates(block_name, local_elem_ids_2);
+                    Kokkos::deep_copy(el_coords_2, h_el_nodes);
+                    Kokkos::deep_copy(block_global_dof_ids, h_gids_view);
 
                     // const int quadrature_order = static_cast<int>(geometry_basis->getCardinality());
                     // TODO read from input file.
-                    const int quadrature_order = 2;
+                    const int quadrature_order = 4;
                     auto quad_ws = QuadratureWorkset<T>(geometry_basis, quadrature_order);
                     auto geom_ws = GeometryBasisWorkset<T, Dim>(geometry_basis, quad_ws, el_coords_2);
 

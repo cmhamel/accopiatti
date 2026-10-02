@@ -1,10 +1,11 @@
-cmake_minimum_required(VERSION 3.28)
+cmake_minimum_required(VERSION 3.31)
 
 project(accopiatti VERSION 1.0.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(Kokkos REQUIRED)
@@ -15,11 +16,18 @@ find_package(Trilinos REQUIRED)
 find_package(yaml-cpp REQUIRED)
 
 # Header-only core library.
+file(GLOB_RECURSE ACCOPIATTI_MODULES
+    CONFIGURE_DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/*.cppm
+)
 file(GLOB_RECURSE ACCOPIATTI_SOURCES
     CONFIGURE_DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/src/accopiatti/*.cpp
 )
-add_library(accopiatti_core ${ACCOPIATTI_SOURCES})
+add_library(accopiatti_core ${ACCOPIATTI_MODULES} ${ACCOPIATTI_SOURCES})
+target_compile_features(accopiatti_core PUBLIC cxx_std_23)
+# set_target_properties(accopiatti_core PROPERTIES CXX_MODULE_STD ON)
+
 add_library(accopiatti::core ALIAS accopiatti_core)
 
 target_include_directories(accopiatti_core
@@ -28,7 +36,7 @@ target_include_directories(accopiatti_core
         ${Trilinos_INCLUDE_DIRS}
 )
 
-target_compile_features(accopiatti_core PUBLIC cxx_std_20)
+# target_compile_features(accopiatti_core PUBLIC cxx_std_20)
 
 target_link_libraries(accopiatti_core
     PUBLIC

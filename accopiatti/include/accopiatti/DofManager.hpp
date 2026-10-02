@@ -28,8 +28,6 @@ public:
         case FunctionSpaceType::L2:
             throw std::runtime_error("Finish L2 wrapper methods");
         }
-
-        throw std::runtime_error("Unsupported feature encounted.");
     }
 
     // should we always be pinging the jacobian
@@ -37,74 +35,30 @@ public:
     // probably a weakness for curved...
     static Teuchos::RCP<Basis<T>> create_geometry(const stk::topology& topology) {
         switch (topology) {
-        // case stk::topology::QUADRILATERAL_4_2D:
-        //     return Teuchos::rcp(new HgradQuadBasis<T>(2));
-        // case stk::topology::HEXAHEDRON_8:
-        //     return Teuchos::rcp(new HgradHexBasis<T>(2));
         case stk::topology::QUADRILATERAL_4_2D:
             return Teuchos::rcp(new Intrepid2::Basis_HGRAD_QUAD_C1_FEM<Device, T, T>());
         case stk::topology::HEXAHEDRON_8:
             return Teuchos::rcp(new Intrepid2::Basis_HGRAD_HEX_C1_FEM<Device, T, T>());
+        case stk::topology::TET_4:
+            return Teuchos::rcp(new Intrepid2::Basis_HGRAD_TET_C1_FEM<Device, T, T>());            
+        case stk::topology::TRI_3_2D:
+            return Teuchos::rcp(new Intrepid2::Basis_HGRAD_TRI_C1_FEM<Device, T, T>());
         default:
-            throw std::runtime_error("Unsupported topology for Hgrad basis: " + topology.name());
+            throw std::runtime_error("Unsupported topology for geometry basis: " + topology.name());
         }
     }
 private:
     static Teuchos::RCP<Basis<T>> create_h1(const stk::topology& topology, const int& order) {
         switch (topology) {
-        // case stk::topology::QUADRILATERAL_4_2D:
-        //     return Teuchos::rcp(new HgradQuadBasis<T>(order));
-        // case stk::topology::HEXAHEDRON_8:
-        //     return Teuchos::rcp(new HgradHexBasis<T>(order));
         case stk::topology::QUADRILATERAL_4_2D:
-            return Teuchos::rcp(new Intrepid2::Basis_HGRAD_QUAD_C1_FEM<Device, T, T>());
+            return Teuchos::rcp(new HgradQuadBasis<T>(order));
         case stk::topology::HEXAHEDRON_8:
-            return Teuchos::rcp(new Intrepid2::Basis_HGRAD_HEX_C1_FEM<Device, T, T>());
+            return Teuchos::rcp(new HgradHexBasis<T>(order));
         default:
             throw std::runtime_error("Unsupported topology for Hgrad basis: " + topology.name());
         }
-
     }
-
     // TODO implement hcurl, hdiv, L2 wrappers
-};
-
-template<Scalar T, int Dim>
-class BasisDofOrdering {
-public:
-    static std::map<int, int> create(const Teuchos::RCP<Basis<T>>& basis, const stk::topology& topology) {
-        switch (topology) {
-        case stk::topology::QUADRILATERAL_4_2D:
-            auto c1_basis = Teuchos::rcp(new Intrepid2::Basis_HGRAD_QUAD_C1_FEM<Device, T, T>());
-            auto cn_basis = Teuchos::rcp(new Intrepid2::Basis_HGRAD_QUAD_Cn_FEM<Device, T, T>(1));
-            auto dof_coords_1 = Kokkos::DynRankView<T>("dof_coords", c1_basis->getCardinality(), Dim);
-            auto dof_coords_n = Kokkos::DynRankView<T>("dof_coords", cn_basis->getCardinality(), Dim);
-
-            c1_basis->getDofCoords(dof_coords_1);
-            cn_basis->getDofCoords(dof_coords_n);
-
-            for (int i = 0; i < 4; ++i) {
-                std::cout << "[" << i << "] = " << dof_coords_1(i, 0) << ", " << dof_coords_1(i, 1) << std::endl;
-            }
-            std::cout << std::endl;
-            for (int i = 0; i < 4; ++i) {
-                std::cout << "[" << i << "] = " << dof_coords_n(i, 0) << ", " << dof_coords_n(i, 1) << std::endl;
-            }
-            // break;
-            auto dof_map = std::map<int, int>({
-                {0, 0},
-                {1, 1},
-                {2, 3},
-                {3, 2}
-            });
-
-            return dof_map;
-
-        // default:
-        //     throw std::runtime_error("Unsupported topology for Hgrad basis: " + topology.name());
-        }
-        throw std::runtime_error("Unsupported topology for Hgrad basis: " + topology.name());
-    }
 };
 
 struct FieldSetupHelper {
@@ -136,7 +90,8 @@ public:
         std::cout << "Finished dof manager setup" << std::endl;
     }
 
-    Kokkos::DynRankView<double, Device> get_dof_coordinates(const std::string& block_name) const {
+    // Kokkos::DynRankView<double, Device> get_dof_coordinates(const std::string& block_name) const {
+    auto get_dof_coordinates_and_local_elem_ids(const std::string& block_name) const {
         const auto& geom_basis = geom_basis_map.at(block_name);
         stk::mesh::EntityIdVector local_elem_ids;
         Kokkos::DynRankView<T, Device> points;
@@ -157,10 +112,10 @@ public:
             local_elem_ids,
             points
         );
-        return points;
+        return std::make_pair(points, local_elem_ids);
     }
 
-    void get_element_global_dof_ids(const std::string& block_name, const LocalOrdinal& e, std::vector<GlobalOrdinal>& gids) {
+    void get_element_global_dof_ids(const std::string& block_name, const LocalOrdinal& e, std::vector<GlobalOrdinal>& gids) const {
         dof_manager->getElementGIDs(e, gids, block_name);
     }
 
@@ -168,8 +123,8 @@ public:
         return dof_manager->getFieldNum(field_name);
     }
 
-    void get_field_offsets(std::vector<GlobalOrdinal>& indices, std::string block_name, int field_num) const {
-        dof_manager->getGIDFieldOffsets(block_name, field_num);
+    const std::vector<int>& get_field_offsets(const std::string& block_name, const int& field_num) const {
+        return dof_manager->getGIDFieldOffsets(block_name, field_num);
     }
 
     const auto& get_field_offsets_closure(
@@ -180,32 +135,6 @@ public:
     ) const {
         return dof_manager->getGIDFieldOffsets_closure(block_name, get_field_id(field_name), subcell_dim, subcell_ord);
     }
-
-    // stk::mesh::EntityIdVector get_local_cell_ids(
-    //     const std::string& block_name
-    // ) const {
-    //     stk::mesh::EntityIdVector local_cell_ids;
-
-    //     const auto& part = get_element_block_part(block_name);
-
-    //     const auto& bulk = get_bulk();
-
-    //     const stk::mesh::BucketVector& buckets =
-    //         bulk->get_buckets(
-    //             stk::topology::ELEM_RANK,
-    //             part
-    //         );
-
-    //     for (const stk::mesh::Bucket* bucket : buckets) {
-    //         for (size_t i = 0; i < bucket->size(); ++i) {
-    //             local_cell_ids.push_back(
-    //                 bulk->identifier((*bucket)[i])
-    //             );
-    //         }
-    //     }
-
-    //     return local_cell_ids;
-    // }
 
     int get_num_solution_fields() const {
         return sol_field_names.size();
@@ -219,11 +148,11 @@ public:
         dof_manager->getOwnedIndices(indices);
     }
 
-    auto get_solution_basis(std::string block_name, std::string field_name) {
+    const auto& get_solution_basis(std::string block_name, std::string field_name) const {
         return sol_basis_map[block_name][field_name];
     }
 
-    auto get_solution_field_names() const {
+    const auto& get_solution_field_names() const {
         return sol_field_names;
     }
 
@@ -249,9 +178,6 @@ private:
         geom_basis_map[block_name] = geom_basis;
         sol_basis_map[block_name].emplace(field_name, sol_basis);
 
-        // dof id map for consistency between stk and intrepid2 dof ordering
-        stk_to_intrepid2_dof_maps[block_name] = BasisDofOrdering<T, Dim>::create(sol_basis, topology);
-
         auto pattern = Teuchos::rcp(new panzer::Intrepid2FieldPattern(sol_basis));
 
         if (fspace_helper.field_type == FieldType::Scalar) {
@@ -273,7 +199,6 @@ public:
     std::map<std::string, Teuchos::RCP<Basis<T>>> geom_basis_map;
     std::map<std::string, std::map<std::string, Teuchos::RCP<Basis<T>>>> sol_basis_map;
     std::vector<std::string> sol_field_names;
-    std::map<std::string, std::map<int, int>> stk_to_intrepid2_dof_maps;
 };
 
 } // end namespace accopiatti

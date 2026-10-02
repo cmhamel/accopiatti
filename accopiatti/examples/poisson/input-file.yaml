@@ -8,17 +8,33 @@ mesh:
 
 solution fields:
   u:
-    basis order: 2
+    basis order: 3
     field type: scalar
     function space: Hgrad
     integration order: 2
 
+functions:
+  f:
+    type: analytic
+    variables: [x, y, t]
+    function: 8 * pi * sin(2 * pi * x) * sin(2 * pi * y)
+  zero:
+    type: analytic
+    variables: [x, y, t]
+    function: 0
+
+initial conditions:
+  - field: u
+    function: zero
+    blocks: [eblock-0_0]
+
 boundary conditions:
   - field: u
-    function: 0.0
+    function: zero
     side sets: [bottom, left, right, top]
     type: dirichlet
 
 physics:
   type: poisson
   solution fields: [u]
+  source function: f

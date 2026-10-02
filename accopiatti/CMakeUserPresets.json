@@ -1,0 +1,125 @@
+{
+	"version": 12,
+	"cmakeMinimumRequired": {
+		"major": 3,
+		"minor": 25,
+		"patch": 0
+	},
+	"configurePresets": [
+		{
+			"name": "layout",
+			"hidden": true,
+			"binaryDir": "${sourceDir}/build/${presetName}",
+			"installDir": "${sourceDir}/install/${presetName}"
+		},
+		{
+			"name": "generator-ninja-multi-config",
+			"hidden": true,
+			"generator": "Ninja Multi-Config",
+			"cacheVariables": {
+				"CMAKE_MAKE_PROGRAM": { "type": "FILEPATH", "value": "ninja" },
+				"CMAKE_CONFIGURATION_TYPES": "Debug;Release"
+			}
+		},
+		{
+			"name": "toolchain-makefiles-llvm",
+			"hidden": true,
+			"cacheVariables": {
+				"CMAKE_CXX_COMPILER": { "type": "FILEPATH", "value": "clang++-23" },
+				"CMAKE_AR": { "type": "FILEPATH", "value": "llvm-ar-23" },
+				"CMAKE_CXX_STDLIB_MODULES_JSON": { "type": "FILEPATH", "value": "/usr/lib/llvm-23/lib/libc++.modules.json" },
+				"CMAKE_CXX_FLAGS": "-stdlib=libc++ -Wno-reserved-module-identifier"
+			}
+		},
+		{
+			"name": "toolchain-makefiles-gcc",
+			"hidden": true,
+			"cacheVariables": {
+				"CMAKE_CXX_COMPILER": { "type": "FILEPATH", "value": "g++-16" }
+			}
+		},
+		{
+			"name": "cache-variables",
+			"hidden": true,
+			"cacheVariables": {
+				"CMAKE_EXPERIMENTAL_CXX_IMPORT_STD": "f35a9ac6-8463-4d38-8eec-5d6008153e7d",
+				"CMAKE_CXX_STANDARD": "23",
+				"CMAKE_CXX_EXTENSIONS": false
+			}
+		},
+		{
+			"name": "ninja-llvm-linux",
+			"displayName": "LLVM",
+			"inherits": [
+				"layout",
+				"generator-ninja-multi-config",
+				"toolchain-makefiles-llvm",
+				"cache-variables"
+			],
+			"warnings": { "experimental": false },
+			"errors": { "author": true },
+			"condition": {
+				"type": "equals",
+				"lhs": "${hostSystemName}",
+				"rhs": "Linux"
+			}
+		},
+		{
+			"name": "ninja-gcc-linux",
+			"displayName": "GCC",
+			"inherits": [
+				"layout",
+				"generator-ninja-multi-config",
+				"toolchain-makefiles-gcc",
+				"cache-variables"
+			],
+			"warnings": { "experimental": false },
+			"errors": { "author": true },
+			"condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" }
+		}
+	],
+	"buildPresets": [
+		{
+			"name": "ninja-llvm-linux-release",
+			"displayName": "all (Release)",
+			"configuration": "Release",
+			"configurePreset": "ninja-llvm-linux"
+		},
+		{
+			"name": "ninja-llvm-linux-debug",
+			"displayName": "all (Debug)",
+			"configuration": "Debug",
+			"configurePreset": "ninja-llvm-linux"
+		},
+		{
+			"name": "ninja-gcc-linux-release",
+			"displayName": "all (Release)",
+			"configuration": "Release",
+			"configurePreset": "ninja-gcc-linux"
+		},
+		{
+			"name": "ninja-gcc-linux-debug",
+			"displayName": "all (Debug)",
+			"configuration": "Debug",
+			"configurePreset": "ninja-gcc-linux"
+		}
+	],
+	"workflowPresets": [
+		{
+			"name": "ninja-llvm-linux",
+			"displayName": "LLVM",
+			"steps": [
+				{ "type": "configure", "name": "ninja-llvm-linux" },
+				{ "type": "build", "name": "ninja-llvm-linux-release" }
+			]
+		},
+		{
+			"name": "ninja-gcc-linux",
+			"displayName": "GCC",
+			"steps": [
+				{ "type": "configure", "name": "ninja-gcc-linux" },
+				{ "type": "build", "name": "ninja-gcc-linux-release" }
+			]
+		}
+	]
+}
